@@ -1,390 +1,595 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { hasSupabase, supabase } from './lib/supabase';
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
-const sportMap = {
-  football: { label: 'Fútbol', icon: '⚽' },
-  tennis: { label: 'Tenis', icon: '🎾' },
-  basketball: { label: 'Baloncesto', icon: '🏀' },
+import Link from 'next/link';
+
+import {
+  hasSupabase,
+  supabase,
+} from './lib/supabase';
+
+const sports = {
+  football: {
+    label: 'Fútbol',
+    icon: '⚽',
+    enabled: true,
+  },
+
+  basketball: {
+    label: 'Baloncesto',
+    icon: '🏀',
+    enabled: true,
+  },
+
+  tennis: {
+    label: 'Tenis',
+    icon: '🎾',
+    enabled: false,
+  },
 };
 
 const defaultSettings = {
-  hero_title: 'Pronósticos analizados con estadísticas que importan',
+  hero_title:
+    'Pronósticos analizados con estadísticas que importan',
+
   hero_subtitle:
-    'Datos, valor esperado y seguimiento en vivo para tomar decisiones mejor informadas.',
+    'Datos, probabilidades, estadísticas y valor esperado para tomar decisiones mejor informadas.',
+
   primary_color: '#83ff35',
+
   accent_color: '#c9ff52',
+
   donation_text:
     'LizamaBet es gratuito. Si deseas apoyar su mantenimiento y nuevas funciones, puedes realizar una donación voluntaria.',
 };
 
-const fallbackLeagues = {
-  football: [
-    'Primera División Chile',
-    'Premier League',
-    'LaLiga',
-    'Serie A',
-    'Bundesliga',
-    'Champions League',
-    'Copa Libertadores',
-    'Copa Sudamericana',
-  ],
-  tennis: [
-    'ATP',
-    'WTA',
-    'Grand Slams',
-    'ATP Masters 1000',
-    'ATP 500',
-    'WTA 1000',
-  ],
-  basketball: [
-    'NBA',
-    'EuroLeague',
-    'ACB',
-    'Basketball Champions League',
-  ],
-};
+const dateFilters = [
+  {
+    id: 'today',
+    label: 'Hoy',
+  },
 
-function groupByLeague(matches) {
-  const map = new Map();
+  {
+    id: 'tomorrow',
+    label: 'Mañana',
+  },
 
-  for (const match of matches) {
-    const key = match.league || 'Otras competiciones';
+  {
+    id: 'upcoming',
+    label: 'Próximos',
+  },
+];
 
-    if (!map.has(key)) {
-      map.set(key, []);
-    }
-
-    map.get(key).push(match);
-  }
-
-  return map;
-}
-
-function parseDate(value) {
-  if (!value) return null;
-
-  if (typeof value === 'number') {
-    const date = new Date(
-      value < 1000000000000
-        ? value * 1000
-        : value
-    );
-
-    return Number.isNaN(date.getTime())
-      ? null
-      : date;
+function formatDate(value) {
+  if (!value) {
+    return '';
   }
 
   const date = new Date(value);
 
-  return Number.isNaN(date.getTime())
-    ? null
-    : date;
-}
-
-function normalizeStatus(status) {
-  return String(status || '')
-    .trim()
-    .toLowerCase();
-}
-
-function isFinished(match) {
-  const status = normalizeStatus(match.status);
-
-  return (
-    status.includes('finished') ||
-    status.includes('final') ||
-    status.includes('ended') ||
-    status.includes('full time') ||
-    status.includes('after penalties') ||
-    status.includes('after extra time') ||
-    status === 'ft'
-  );
-}
-
-function isLive(match) {
-  const status = normalizeStatus(match.status);
-
-  if (isFinished(match)) {
-    return false;
-  }
-
-  return (
-    status.includes('live') ||
-    status.includes('in progress') ||
-    status.includes('playing') ||
-    status.includes('1st half') ||
-    status.includes('2nd half') ||
-    status.includes('halftime') ||
-    status.includes('half time') ||
-    status.includes('extra time') ||
-    status.includes('penalty') ||
-    status === '1h' ||
-    status === '2h' ||
-    status === 'ht' ||
-    (
-      match.minute !== null &&
-      match.minute !== undefined
+  if (
+    Number.isNaN(
+      date.getTime()
     )
-  );
-}
-
-function isToday(match) {
-  const date = parseDate(match.startTime);
-
-  if (!date) return false;
-
-  const now = new Date();
-
-  return (
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
-  );
-}
-
-function isUpcoming(match) {
-  if (isLive(match) || isFinished(match)) {
-    return false;
+  ) {
+    return '';
   }
 
-  const date = parseDate(match.startTime);
+  return new Intl.DateTimeFormat(
+    'es-CL',
+    {
+      timeZone:
+        'America/Santiago',
 
-  if (!date) return false;
+      day: '2-digit',
 
-  return date.getTime() > Date.now();
+      month: '2-digit',
+
+      year: 'numeric',
+
+      hour: '2-digit',
+
+      minute: '2-digit',
+
+      hour12: false,
+    }
+  ).format(date);
 }
 
-function formatMatchDate(value) {
-  const date = parseDate(value);
+function getCountryEmoji(country) {
+  const flags = {
+    Chile: '🇨🇱',
+    Argentina: '🇦🇷',
+    Brazil: '🇧🇷',
+    Brasil: '🇧🇷',
+    Spain: '🇪🇸',
+    España: '🇪🇸',
+    England: '🏴',
+    Italy: '🇮🇹',
+    Germany: '🇩🇪',
+    France: '🇫🇷',
+    Portugal: '🇵🇹',
+    Netherlands: '🇳🇱',
+    Belgium: '🇧🇪',
+    Uruguay: '🇺🇾',
+    Paraguay: '🇵🇾',
+    Colombia: '🇨🇴',
+    Ecuador: '🇪🇨',
+    Peru: '🇵🇪',
+    Bolivia: '🇧🇴',
+    Mexico: '🇲🇽',
+    USA: '🇺🇸',
+    'United States': '🇺🇸',
+    Turkey: '🇹🇷',
+    Greece: '🇬🇷',
+    Scotland: '🏴',
+  };
 
-  if (!date) return '';
+  return (
+    flags[country] ||
+    '🌐'
+  );
+}
 
-  return new Intl.DateTimeFormat('es-CL', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
+function MatchCard({
+  match,
+  sport,
+}) {
+  return (
+    <article
+      className="matchCard"
+    >
+      <div className="matchTop">
+
+        <div className="matchCompetition">
+
+          {match.flag ? (
+            <img
+              src={match.flag}
+              alt=""
+              className="countryFlag"
+            />
+          ) : (
+            <span>
+              {getCountryEmoji(
+                match.country
+              )}
+            </span>
+          )}
+
+          <span>
+            {match.country}
+          </span>
+
+          <span className="dot">
+            •
+          </span>
+
+          <strong>
+            {match.league}
+          </strong>
+
+        </div>
+
+        <span className="scheduledBadge">
+          Programado
+        </span>
+
+      </div>
+
+      <div className="matchDate">
+        🗓️{' '}
+        {formatDate(
+          match.startTime
+        )}
+      </div>
+
+      <div className="teams">
+
+        <div className="team">
+
+          {match.homeLogo ? (
+            <img
+              src={
+                match.homeLogo
+              }
+              alt={
+                match.home
+              }
+              className="teamLogo"
+            />
+          ) : (
+            <div className="teamLogoFallback">
+              {sport ===
+              'basketball'
+                ? '🏀'
+                : '⚽'}
+            </div>
+          )}
+
+          <strong>
+            {match.home}
+          </strong>
+
+        </div>
+
+        <div className="versus">
+          VS
+        </div>
+
+        <div className="team">
+
+          {match.awayLogo ? (
+            <img
+              src={
+                match.awayLogo
+              }
+              alt={
+                match.away
+              }
+              className="teamLogo"
+            />
+          ) : (
+            <div className="teamLogoFallback">
+              {sport ===
+              'basketball'
+                ? '🏀'
+                : '⚽'}
+            </div>
+          )}
+
+          <strong>
+            {match.away}
+          </strong>
+
+        </div>
+
+      </div>
+
+      <div className="previewBox">
+
+        <div>
+
+          <span className="previewLabel">
+            ANÁLISIS LIZAMABET
+          </span>
+
+          <strong>
+            Próximamente
+          </strong>
+
+        </div>
+
+        <p>
+          Estadísticas,
+          probabilidades,
+          tendencias y cuotas
+          se mostrarán aquí
+          cuando estén
+          disponibles.
+        </p>
+
+      </div>
+
+      <button
+        className="analysisButton"
+        disabled
+      >
+        📊 Ver análisis
+      </button>
+
+    </article>
+  );
 }
 
 export default function Home() {
-  const [sport, setSport] = useState('football');
-  const [matches, setMatches] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [sourceOk, setSourceOk] = useState(false);
 
-  const [selectedLeague, setSelectedLeague] =
-    useState('Todas');
+  const [
+    sport,
+    setSport,
+  ] = useState(
+    'football'
+  );
 
-  const [filter, setFilter] = useState('Hoy');
+  const [
+    dateFilter,
+    setDateFilter,
+  ] = useState(
+    'today'
+  );
 
-  const [settings, setSettings] =
-    useState(defaultSettings);
+  const [
+    matches,
+    setMatches,
+  ] = useState([]);
 
-  const [customLeagues, setCustomLeagues] =
-    useState([]);
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
 
-  const [search, setSearch] = useState('');
+  const [
+    error,
+    setError,
+  ] = useState('');
+
+  const [
+    selectedLeague,
+    setSelectedLeague,
+  ] = useState(
+    'all'
+  );
+
+  const [
+    settings,
+    setSettings,
+  ] = useState(
+    defaultSettings
+  );
 
   useEffect(() => {
-    document.documentElement.style.setProperty(
-      '--primary',
-      settings.primary_color
-    );
 
-    document.documentElement.style.setProperty(
-      '--accent',
-      settings.accent_color
-    );
+    document
+      .documentElement
+      .style
+      .setProperty(
+        '--primary',
+        settings.primary_color
+      );
+
+    document
+      .documentElement
+      .style
+      .setProperty(
+        '--accent',
+        settings.accent_color
+      );
+
   }, [settings]);
 
   useEffect(() => {
-    if (!hasSupabase) return;
+
+    if (!hasSupabase) {
+      return;
+    }
 
     async function loadSettings() {
-      const { data } = await supabase
-        .from('site_settings')
-        .select('key,value');
 
-      if (data?.length) {
-        const incoming = Object.fromEntries(
-          data.map(item => [
-            item.key,
-            item.value,
-          ])
+      try {
+
+        const {
+          data,
+        } =
+          await supabase
+            .from(
+              'site_settings'
+            )
+            .select(
+              'key,value'
+            );
+
+        if (
+          data?.length
+        ) {
+
+          const incoming =
+            Object.fromEntries(
+              data.map(
+                item => [
+                  item.key,
+                  item.value,
+                ]
+              )
+            );
+
+          setSettings(
+            current => ({
+              ...current,
+              ...incoming,
+            })
+          );
+        }
+
+      } catch (err) {
+
+        console.error(
+          'Settings:',
+          err
         );
 
-        setSettings(current => ({
-          ...current,
-          ...incoming,
-        }));
       }
     }
 
     loadSettings();
+
   }, []);
 
-  useEffect(() => {
-    if (!hasSupabase) {
-      setCustomLeagues([]);
+  async function loadMatches() {
+
+    if (
+      sport ===
+      'tennis'
+    ) {
+      setMatches([]);
+      setLoading(false);
       return;
     }
 
-    async function loadLeagues() {
-      const { data } = await supabase
-        .from('leagues')
-        .select(
-          'name,sport,active,featured'
-        )
-        .eq('sport', sport)
-        .eq('active', true)
-        .order('featured', {
-          ascending: false,
-        })
-        .order('name');
-
-      setCustomLeagues(data || []);
-    }
-
-    loadLeagues();
-  }, [sport]);
-
-  async function loadMatches() {
     setLoading(true);
+    setError('');
 
     try {
-      const response = await fetch(
-        `/api/sportscore?sport=${sport}`,
-        {
-          cache: 'no-store',
-        }
+
+      const endpoint =
+        sport ===
+        'football'
+          ? '/api/football'
+          : '/api/basketball';
+
+      const response =
+        await fetch(
+          `${endpoint}?mode=${dateFilter}`,
+          {
+            cache:
+              'no-store',
+          }
+        );
+
+      const data =
+        await response.json();
+
+      if (
+        !response.ok ||
+        !data.ok
+      ) {
+        throw new Error(
+          data.error ||
+            'No fue posible cargar los partidos.'
+        );
+      }
+
+      setMatches(
+        data.matches || []
       );
 
-      const data = await response.json();
+    } catch (err) {
 
-      setMatches(data.matches || []);
-      setSourceOk(Boolean(data.ok));
-    } catch (error) {
-      console.error(error);
+      console.error(
+        err
+      );
 
       setMatches([]);
-      setSourceOk(false);
+
+      setError(
+        err.message ||
+          'No fue posible cargar los partidos.'
+      );
+
     } finally {
+
       setLoading(false);
+
     }
   }
 
   useEffect(() => {
-    setSelectedLeague('Todas');
+
+    setSelectedLeague(
+      'all'
+    );
 
     loadMatches();
 
-    const intervalTime =
-      filter === 'En vivo'
-        ? 30000
-        : 60000;
+  }, [
+    sport,
+    dateFilter,
+  ]);
 
-    const interval = setInterval(
-      loadMatches,
-      intervalTime
-    );
+  const competitions =
+    useMemo(() => {
 
-    return () => {
-      clearInterval(interval);
-    };
-  }, [sport, filter]);
+      const map =
+        new Map();
 
-  const leagueNames = useMemo(() => {
-    const realLeagues = [
-      ...new Set(
-        matches
-          .map(match => match.league)
-          .filter(Boolean)
-      ),
-    ];
+      matches.forEach(
+        match => {
 
-    const configuredLeagues =
-      customLeagues.map(
-        league => league.name
+          const key =
+            `${match.country}-${match.league}`;
+
+          if (
+            !map.has(key)
+          ) {
+
+            map.set(
+              key,
+              {
+                key,
+
+                league:
+                  match.league,
+
+                country:
+                  match.country,
+
+                flag:
+                  match.flag,
+
+                leagueLogo:
+                  match.leagueLogo,
+              }
+            );
+          }
+        }
       );
 
-    const merged = [
-      ...new Set([
-        ...configuredLeagues,
-        ...realLeagues,
-        ...fallbackLeagues[sport],
-      ]),
-    ];
+      return [
+        ...map.values(),
+      ].sort(
+        (a, b) => {
 
-    return merged.filter(name =>
-      name
-        .toLowerCase()
-        .includes(
-          search.toLowerCase()
-        )
-    );
-  }, [
-    matches,
-    customLeagues,
-    sport,
-    search,
-  ]);
+          const countryCompare =
+            String(
+              a.country
+            ).localeCompare(
+              String(
+                b.country
+              ),
+              'es'
+            );
 
-  const filteredMatches = useMemo(() => {
-    let result =
-      selectedLeague === 'Todas'
-        ? [...matches]
-        : matches.filter(
-            match =>
-              match.league ===
-              selectedLeague
+          if (
+            countryCompare !==
+            0
+          ) {
+            return countryCompare;
+          }
+
+          return String(
+            a.league
+          ).localeCompare(
+            String(
+              b.league
+            ),
+            'es'
           );
+        }
+      );
 
-    if (filter === 'En vivo') {
-      result = result.filter(isLive);
-    }
+    }, [matches]);
 
-    if (filter === 'Hoy') {
-      result = result.filter(isToday);
-    }
+  const filteredMatches =
+    useMemo(() => {
 
-    if (filter === 'Próximos') {
-      result = result
-        .filter(isUpcoming)
-        .sort((a, b) => {
-          const dateA =
-            parseDate(
-              a.startTime
-            )?.getTime() || 0;
+      if (
+        selectedLeague ===
+        'all'
+      ) {
+        return matches;
+      }
 
-          const dateB =
-            parseDate(
-              b.startTime
-            )?.getTime() || 0;
+      return matches.filter(
+        match =>
+          `${match.country}-${match.league}` ===
+          selectedLeague
+      );
 
-          return dateA - dateB;
-        });
-    }
+    }, [
+      matches,
+      selectedLeague,
+    ]);
 
-    return result;
-  }, [
-    matches,
-    selectedLeague,
-    filter,
-  ]);
-
-  const grouped = useMemo(
-    () =>
-      groupByLeague(
-        filteredMatches
-      ),
-    [filteredMatches]
-  );
+  const selectedCompetition =
+    competitions.find(
+      competition =>
+        competition.key ===
+        selectedLeague
+    );
 
   return (
     <main>
@@ -392,21 +597,23 @@ export default function Home() {
       <header className="topbar">
 
         <div className="brandWrap">
+
           <img
             src="/logo.png"
             className="brandLogo"
             alt="LizamaBet"
           />
+
         </div>
 
         <nav className="topActions">
 
-          <a href="#deportes">
-            Deportes
+          <a href="#partidos">
+            Partidos
           </a>
 
-          <a href="#combos">
-            Combos
+          <a href="#destacados">
+            Pronósticos
           </a>
 
           <Link
@@ -425,29 +632,38 @@ export default function Home() {
         <div>
 
           <span className="eyebrow">
-            LIZAMABET · DATOS DEPORTIVOS
+            LIZAMABET ·
+            ANÁLISIS DEPORTIVO
           </span>
 
           <h1>
-            {settings.hero_title}
+            {
+              settings.hero_title
+            }
           </h1>
 
           <p>
-            {settings.hero_subtitle}
+            {
+              settings.hero_subtitle
+            }
           </p>
 
           <div className="heroBadges">
 
             <span>
-              📡 SportScore
+              📊 Estadísticas
             </span>
 
             <span>
-              📊 Probabilidad
+              🎯 Probabilidades
             </span>
 
             <span>
               💎 Valor esperado
+            </span>
+
+            <span>
+              💰 Cuotas reales
             </span>
 
           </div>
@@ -463,8 +679,9 @@ export default function Home() {
           </strong>
 
           <p>
-            Las probabilidades son
-            estimaciones y no garantizan
+            Las probabilidades
+            son estimaciones y
+            no garantizan
             resultados.
           </p>
 
@@ -473,7 +690,7 @@ export default function Home() {
       </section>
 
       <section
-        id="deportes"
+        id="partidos"
         className="section"
       >
 
@@ -482,29 +699,19 @@ export default function Home() {
           <div>
 
             <span className="eyebrow">
-              EXPLORAR
+              PARTIDOS
             </span>
 
             <h2>
-              Deportes y ligas
+              Próximos eventos
             </h2>
 
           </div>
 
-          <div
-            className={
-              `source ${
-                sourceOk
-                  ? 'ok'
-                  : 'bad'
-              }`
-            }
-          >
-
-            {sourceOk
-              ? '● SportScore conectado'
-              : '● SportScore sin conexión'}
-
+          <div className="apiStatus">
+            <span className="statusDot" />
+            Datos deportivos
+            conectados
           </div>
 
         </div>
@@ -512,24 +719,48 @@ export default function Home() {
         <div className="sportTabs">
 
           {Object.entries(
-            sportMap
+            sports
           ).map(
-            ([key, item]) => (
+            ([
+              key,
+              item,
+            ]) => (
 
               <button
                 key={key}
+
                 className={
                   sport === key
                     ? 'active'
                     : ''
                 }
-                onClick={() =>
-                  setSport(key)
+
+                onClick={() => {
+
+                  if (
+                    item.enabled
+                  ) {
+                    setSport(
+                      key
+                    );
+                  }
+
+                }}
+
+                disabled={
+                  !item.enabled
                 }
               >
 
                 {item.icon}{' '}
                 {item.label}
+
+                {!item.enabled && (
+                  <small>
+                    {' '}
+                    Próximamente
+                  </small>
+                )}
 
               </button>
 
@@ -538,384 +769,503 @@ export default function Home() {
 
         </div>
 
-        <div className="leagueLayout">
+        <div className="dateFilters">
 
-          <aside className="leaguePanel">
+          {dateFilters.map(
+            item => (
 
-            <div className="leagueTitle">
-              Ligas / Torneos
-            </div>
+              <button
+                key={
+                  item.id
+                }
 
-            <input
-              className="searchInput"
-              value={search}
-              onChange={event =>
-                setSearch(
-                  event.target.value
-                )
-              }
-              placeholder="Buscar liga..."
-            />
+                className={
+                  dateFilter ===
+                  item.id
+                    ? 'dateButton activeDate'
+                    : 'dateButton'
+                }
 
-            <button
-              className={
-                selectedLeague ===
-                'Todas'
-                  ? 'league activeLeague'
-                  : 'league'
-              }
-              onClick={() =>
+                onClick={() =>
+                  setDateFilter(
+                    item.id
+                  )
+                }
+              >
+                {item.label}
+              </button>
+
+            )
+          )}
+
+        </div>
+
+        <div className="competitionSelector">
+
+          <label>
+            Competición
+          </label>
+
+          <select
+            value={
+              selectedLeague
+            }
+
+            onChange={
+              event =>
                 setSelectedLeague(
-                  'Todas'
+                  event.target
+                    .value
                 )
-              }
-            >
-              ⭐ Todas
-            </button>
+            }
+          >
 
-            {leagueNames.map(
-              name => (
+            <option value="all">
+              🌎 Todas las
+              competiciones
+            </option>
 
-                <button
-                  key={name}
-                  className={
-                    selectedLeague ===
-                    name
-                      ? 'league activeLeague'
-                      : 'league'
+            {competitions.map(
+              competition => (
+
+                <option
+                  key={
+                    competition.key
                   }
-                  onClick={() =>
-                    setSelectedLeague(
-                      name
-                    )
+
+                  value={
+                    competition.key
                   }
                 >
-                  {name}
-                </button>
+
+                  {getCountryEmoji(
+                    competition.country
+                  )}{' '}
+
+                  {
+                    competition.country
+                  }
+
+                  {' — '}
+
+                  {
+                    competition.league
+                  }
+
+                </option>
 
               )
             )}
 
-          </aside>
+          </select>
 
-          <div className="matchesArea">
+          {selectedCompetition && (
 
-            <div className="filters">
+            <div className="selectedCompetition">
 
-              {[
-                'En vivo',
-                'Hoy',
-                'Próximos',
-              ].map(
-                option => (
+              {selectedCompetition.flag ? (
 
-                  <button
-                    key={option}
-                    className={
-                      filter === option
-                        ? 'filter activeFilter'
-                        : 'filter'
-                    }
-                    onClick={() =>
-                      setFilter(
-                        option
-                      )
-                    }
-                  >
-                    {option}
-                  </button>
+                <img
+                  src={
+                    selectedCompetition.flag
+                  }
+                  alt=""
+                />
 
-                )
+              ) : (
+
+                <span>
+                  {getCountryEmoji(
+                    selectedCompetition.country
+                  )}
+                </span>
+
               )}
 
-              <button
-                className="refresh"
-                onClick={
-                  loadMatches
-                }
-              >
-                ↻ Actualizar
-              </button>
+              <div>
+
+                <small>
+                  {
+                    selectedCompetition.country
+                  }
+                </small>
+
+                <strong>
+                  {
+                    selectedCompetition.league
+                  }
+                </strong>
+
+              </div>
 
             </div>
 
-            {loading ? (
+          )}
 
-              <div className="empty">
-                Cargando partidos…
-              </div>
+        </div>
 
-            ) : filteredMatches.length === 0 ? (
+        <div className="matchSummary">
 
-              <div className="empty">
+          <span>
+            {loading
+              ? 'Buscando partidos...'
+              : `${filteredMatches.length} partido(s) disponible(s)`}
+          </span>
 
-                No hay partidos disponibles
-                para este filtro en este
-                momento.
+          <button
+            onClick={
+              loadMatches
+            }
+            className="refreshButton"
+          >
+            ↻ Actualizar
+          </button>
 
-                <small>
-                  La información depende de
-                  los partidos que SportScore
-                  esté entregando actualmente.
-                </small>
+        </div>
 
-              </div>
+        {error && (
 
-            ) : (
+          <div className="errorBox">
 
-              [...grouped.entries()].map(
-                ([league, games]) => (
+            <strong>
+              No pudimos cargar
+              los partidos.
+            </strong>
 
-                  <div
-                    key={league}
-                    className="leagueBlock"
-                  >
+            <p>
+              {error}
+            </p>
 
-                    <div className="leagueHeader">
+          </div>
 
-                      {league}
+        )}
 
-                      <span>
-                        {games.length}{' '}
-                        partido(s)
-                      </span>
+        {loading ? (
 
-                    </div>
+          <div className="loadingBox">
 
-                    {games.map(
-                      game => (
+            <div className="loader" />
 
-                        <article
-                          className="matchCard"
-                          key={game.id}
-                        >
+            <strong>
+              Cargando partidos…
+            </strong>
 
-                          <div>
+            <small>
+              Consultando datos
+              deportivos.
+            </small>
 
-                            <span className="status">
+          </div>
 
-                              {game.status ||
-                                'Programado'}
+        ) : filteredMatches.length ===
+          0 ? (
 
-                              {game.minute
-                                ? ` · ${game.minute}'`
-                                : ''}
+          <div className="empty">
 
-                            </span>
+            <strong>
+              No hay partidos
+              disponibles.
+            </strong>
 
-                            {game.startTime && (
+            <small>
+              Prueba con otra
+              fecha o
+              competición.
+            </small>
 
-                              <small
-                                style={{
-                                  display:
-                                    'block',
-                                  marginTop:
-                                    '4px',
-                                  opacity:
-                                    0.75,
-                                }}
-                              >
+          </div>
 
-                                {formatMatchDate(
-                                  game.startTime
-                                )}
+        ) : (
 
-                              </small>
+          <div className="matchesGrid">
 
-                            )}
+            {filteredMatches.map(
+              match => (
 
-                            <h3>
+                <MatchCard
+                  key={
+                    match.id
+                  }
+                  match={
+                    match
+                  }
+                  sport={
+                    sport
+                  }
+                />
 
-                              {game.home}{' '}
-
-                              <b>
-                                {game.homeScore ??
-                                  '-'}
-                              </b>
-
-                            </h3>
-
-                            <h3>
-
-                              {game.away}{' '}
-
-                              <b>
-                                {game.awayScore ??
-                                  '-'}
-                              </b>
-
-                            </h3>
-
-                          </div>
-
-                          <div className="analysis">
-
-                            <span>
-                              Mercados y modelo
-                            </span>
-
-                            <strong>
-                              Próximamente
-                            </strong>
-
-                            <small>
-                              Se habilitarán al
-                              conectar
-                              probabilidades y
-                              cuotas reales.
-                            </small>
-
-                          </div>
-
-                        </article>
-
-                      )
-                    )}
-
-                  </div>
-
-                )
               )
-
             )}
 
           </div>
 
-        </div>
+        )}
 
       </section>
 
       <section
-        id="combos"
-        className="section"
+        id="destacados"
+        className="section analysisSection"
       >
 
         <span className="eyebrow">
-          COMBINADAS
+          PRÓXIMA ETAPA
         </span>
 
         <h2>
-          Combos LizamaBet
+          Análisis LizamaBet
         </h2>
 
-        <div className="comboGrid">
+        <p>
+          Cada partido tendrá
+          una ficha detallada
+          utilizando únicamente
+          datos disponibles de
+          las fuentes
+          deportivas.
+        </p>
 
-          <div className="combo">
+        <div className="featuresGrid">
 
+          <div className="featureCard">
             <span>
-              🛡️
+              🎯
             </span>
-
-            <h3>
-              Conservadora
-            </h3>
-
             <strong>
-              Objetivo 2.00+
+              Pronósticos
             </strong>
-
             <p>
-              Selecciones de mayor
-              confianza.
+              1X2, doble
+              oportunidad,
+              goles, totales y
+              tendencias.
             </p>
-
           </div>
 
-          <div className="combo">
-
+          <div className="featureCard">
             <span>
-              💣
+              📈
             </span>
-
-            <h3>
-              Bomba del Día
-            </h3>
-
             <strong>
-              Objetivo 3.00+
+              Últimos 5/10
             </strong>
-
             <p>
-              Valor con riesgo intermedio.
+              Forma reciente,
+              local/visita y
+              enfrentamientos
+              directos.
             </p>
-
           </div>
 
-          <div className="combo">
-
+          <div className="featureCard">
             <span>
-              🚀
+              🚩
             </span>
-
-            <h3>
-              Arriesgada
-            </h3>
-
             <strong>
-              Objetivo 5.00+
+              Córners
             </strong>
-
             <p>
-              Mayor cuota y mayor
-              incertidumbre.
+              Promedios y
+              tendencias de
+              tiros de esquina
+              cuando existan
+              datos.
             </p>
+          </div>
 
+          <div className="featureCard">
+            <span>
+              👤
+            </span>
+            <strong>
+              Jugadores
+            </strong>
+            <p>
+              Remates, goles,
+              tarjetas, puntos,
+              triples, rebotes y
+              más según deporte.
+            </p>
+          </div>
+
+          <div className="featureCard">
+            <span>
+              💰
+            </span>
+            <strong>
+              Cuotas
+            </strong>
+            <p>
+              Comparación con
+              cuotas reales
+              cuando estén
+              disponibles.
+            </p>
+          </div>
+
+          <div className="featureCard">
+            <span>
+              💎
+            </span>
+            <strong>
+              Valor
+            </strong>
+            <p>
+              Probabilidad
+              LizamaBet frente a
+              la probabilidad
+              implícita de la
+              cuota.
+            </p>
           </div>
 
         </div>
 
       </section>
 
-      <section className="donation">
+      <section className="donationSection">
 
         <div>
 
           <span className="eyebrow">
-            COMUNIDAD
+            APOYA LIZAMABET
           </span>
 
           <h2>
-            Apoya LizamaBet
+            Ayuda a mantener el
+            proyecto
           </h2>
 
           <p>
-            {settings.donation_text}
+            {
+              settings.donation_text
+            }
           </p>
 
         </div>
 
         <a
-          className="donateBtn"
-          href={
-            process.env
-              .NEXT_PUBLIC_MERCADOPAGO_URL ||
-            'https://mpago.la/1dqB5EM'
-          }
+          href="https://mpago.la/1dqB5EM"
           target="_blank"
-          rel="noreferrer"
+          rel="noopener noreferrer"
+          className="donationButton"
         >
-          💚 Donar con Mercado Pago
+          💙 Donar con
+          Mercado Pago
         </a>
 
       </section>
 
       <footer>
 
-        <div>
-          LizamaBet · 18+ · Juega con
-          responsabilidad
-        </div>
+        <img
+          src="/logo.png"
+          alt="LizamaBet"
+        />
 
-        <a
-          href="https://sportscore.com/"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Powered by SportScore
-        </a>
+        <p>
+          LizamaBet entrega
+          información y análisis
+          estadístico. No
+          garantiza resultados
+          deportivos.
+        </p>
 
       </footer>
 
-    </main>
-  );
-    }
+      <style jsx>{`
+
+        .apiStatus {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 9px 14px;
+          border-radius: 999px;
+          background: rgba(131,255,53,.08);
+          border: 1px solid rgba(131,255,53,.25);
+          font-size: 13px;
+          font-weight: 700;
+        }
+
+        .statusDot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: var(--primary);
+          box-shadow: 0 0 12px var(--primary);
+        }
+
+        .dateFilters {
+          display: flex;
+          gap: 8px;
+          margin: 20px 0;
+          overflow-x: auto;
+        }
+
+        .dateButton {
+          border: 1px solid rgba(255,255,255,.12);
+          background: rgba(255,255,255,.04);
+          color: #fff;
+          border-radius: 12px;
+          padding: 11px 18px;
+          font-weight: 800;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+
+        .activeDate {
+          background: var(--primary);
+          color: #071008;
+          border-color: var(--primary);
+        }
+
+        .competitionSelector {
+          margin: 18px 0;
+          padding: 18px;
+          border-radius: 18px;
+          background: rgba(255,255,255,.035);
+          border: 1px solid rgba(255,255,255,.08);
+        }
+
+        .competitionSelector label {
+          display: block;
+          font-size: 12px;
+          font-weight: 900;
+          letter-spacing: .08em;
+          text-transform: uppercase;
+          opacity: .65;
+          margin-bottom: 9px;
+        }
+
+        .competitionSelector select {
+          width: 100%;
+          padding: 14px;
+          border-radius: 12px;
+          border: 1px solid rgba(255,255,255,.14);
+          background: #11151a;
+          color: #fff;
+          font-size: 15px;
+          outline: none;
+        }
+
+        .selectedCompetition {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-top: 14px;
+        }
+
+        .selectedCompetition img {
+          width: 28px;
+          max-height: 22px;
+          object-fit: contain;
+        }
+
+        .selectedCompetition small,
+        .selectedCompetition strong {
+          display: block;
+        }
+
+        .selectedCompetition small {
+          opacity: .6;
+         
