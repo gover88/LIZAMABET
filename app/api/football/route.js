@@ -3,26 +3,84 @@ import { NextResponse } from 'next/server';
 const API_URL = 'https://v3.football.api-sports.io';
 
 function getChileDate(addDays = 0) {
-  const date = new Date();
+  const now = new Date();
 
-  date.setDate(date.getDate() + addDays);
+  const chileNow = new Date(
+    now.toLocaleString('en-US', {
+      timeZone: 'America/Santiago',
+    })
+  );
 
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Santiago',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
+  chileNow.setDate(chileNow.getDate() + addDays);
 
-  const getPart = type =>
-    parts.find(part => part.type === type)?.value;
+  const year = chileNow.getFullYear();
 
-  return `${getPart('year')}-${getPart('month')}-${getPart('day')}`;
+  const month = String(
+    chileNow.getMonth() + 1
+  ).padStart(2, '0');
+
+  const day = String(
+    chileNow.getDate()
+  ).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+async function fetchFixtures(date, apiKey) {
+  const params = new URLSearchParams({
+    date,
+    timezone: 'America/Santiago',
+  });
+
+  const response = await fetch(
+    `${API_URL}/fixtures?${params.toString()}`,
+    {
+      headers: {
+        'x-apisports-key': apiKey,
+      },
+
+      next: {
+        revalidate: 900,
+      },
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      `API-Football HTTP ${response.status}`
+    );
+  }
+
+  const errors = data?.errors;
+
+  if (
+    errors &&
+    ((Array.isArray(errors) &&
+      errors.length > 0) ||
+      (!Array.isArray(errors) &&
+        Object.keys(errors).length > 0))
+  ) {
+    throw new Error(
+      JSON.stringify(errors)
+    );
+  }
+
+  return data.response || [];
+}
+
+function isUpcomingFixture(item) {
+  const status =
+    item?.fixture?.status?.short || '';
+
+  return ['NS', 'TBD'].includes(status);
 }
 
 export async function GET(request) {
   try {
-    const apiKey = process.env.API_FOOTBALL_KEY;
+    const apiKey =
+      process.env.API_FOOTBALL_KEY;
 
     if (!apiKey) {
       return NextResponse.json(
@@ -31,134 +89,138 @@ export async function GET(request) {
           error:
             'API_FOOTBALL_KEY no está configurada en Vercel.',
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
 
-    const { searchParams } = new URL(request.url);
+    const { searchParams } =
+      new URL(request.url);
 
-    const mode = searchParams.get('mode') || 'today';
+    const mode =
+      searchParams.get('mode') || 'today';
 
-    let from = getChileDate(0);
-    let to = getChileDate(0);
+    let days = [0];
 
     if (mode === 'tomorrow') {
-      from = getChileDate(1);
-      to = getChileDate(1);
+      days = [1];
     }
 
     if (mode === 'upcoming') {
-      from = getChileDate(0);
-      to = getChileDate(7);
+      days = [0, 1, 2, 3, 4, 5, 6];
     }
 
-    const params = new URLSearchParams({
-      from,
-      to,
-      timezone: 'America/Santiago',
-    });
+    const allFixtures = [];
 
-    const response = await fetch(
-      `${API_URL}/fixtures?${params.toString()}`,
-      {
-        headers: {
-          'x-apisports-key': apiKey,
-        },
+    for (const dayOffset of days) {
+      const date =
+        getChileDate(dayOffset);
 
-        next: {
-          revalidate: 900,
-        },
+      const fixtures =
+        await fetchFixtures(
+          date,
+          apiKey
+        );
+
+      allFixtures.push(
+        ...fixtures
+      );
+    }
+
+    const uniqueFixtures =
+      new Map();
+
+    for (const fixture of allFixtures) {
+      if (!fixture?.fixture?.id) {
+        continue;
       }
-    );
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'Error consultando API-Football.',
-          details: data,
-        },
-        {
-          status: response.status,
-        }
+      uniqueFixtures.set(
+        fixture.fixture.id,
+        fixture
       );
     }
 
-    const errors = data?.errors;
+    const matches = [
+      ...uniqueFixtures.values(),
+    ]
+      .filter(isUpcomingFixture)
 
-    if (
-      errors &&
-      ((Array.isArray(errors) && errors.length > 0) ||
-        (!Array.isArray(errors) &&
-          Object.keys(errors).length > 0))
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'API-Football devolvió un error.',
-          details: errors,
-        },
-        {
-          status: 502,
-        }
-      );
-    }
-
-    const matches = (data.response || [])
-      .filter(item => {
-        const status =
-          item?.fixture?.status?.short || '';
-
-        return ['NS', 'TBD'].includes(status);
-      })
       .map(item => ({
-        id: item.fixture.id,
+        id:
+          item.fixture.id,
 
-        sport: 'football',
+        sport:
+          'football',
 
-        startTime: item.fixture.date,
+        startTime:
+          item.fixture.date,
 
-        timestamp: item.fixture.timestamp,
+        timestamp:
+          item.fixture.timestamp,
 
         status:
-          item.fixture.status.long ||
+          item.fixture.status?.long ||
           'Programado',
 
-        league: item.league.name,
+        statusShort:
+          item.fixture.status?.short ||
+          'NS',
 
-        leagueId: item.league.id,
+        league:
+          item.league?.name ||
+          'Competición',
+
+        leagueId:
+          item.league?.id ||
+          null,
 
         country:
-          item.league.country || 'Internacional',
+          item.league?.country ||
+          'Internacional',
 
         leagueLogo:
-          item.league.logo || null,
+          item.league?.logo ||
+          null,
 
         flag:
-          item.league.flag || null,
+          item.league?.flag ||
+          null,
 
         season:
-          item.league.season || null,
+          item.league?.season ||
+          null,
 
         round:
-          item.league.round || null,
+          item.league?.round ||
+          null,
 
-        home: item.teams.home.name,
+        home:
+          item.teams?.home?.name ||
+          'Local',
 
-        homeId: item.teams.home.id,
+        homeId:
+          item.teams?.home?.id ||
+          null,
 
         homeLogo:
-          item.teams.home.logo || null,
+          item.teams?.home?.logo ||
+          null,
 
-        away: item.teams.away.name,
+        away:
+          item.teams?.away?.name ||
+          'Visitante',
 
-        awayId: item.teams.away.id,
+        awayId:
+          item.teams?.away?.id ||
+          null,
 
         awayLogo:
-          item.teams.away.logo || null,
+          item.teams?.away?.logo ||
+          null,
       }))
+
       .sort(
         (a, b) =>
           Number(a.timestamp) -
@@ -168,22 +230,24 @@ export async function GET(request) {
     return NextResponse.json({
       ok: true,
 
-      source: 'API-Football',
+      source:
+        'API-Football',
 
-      sport: 'football',
+      sport:
+        'football',
 
       mode,
 
-      from,
-
-      to,
-
-      count: matches.length,
+      count:
+        matches.length,
 
       matches,
     });
   } catch (error) {
-    console.error('API Football error:', error);
+    console.error(
+      'API Football error:',
+      error
+    );
 
     return NextResponse.json(
       {
@@ -192,7 +256,8 @@ export async function GET(request) {
         error:
           'No fue posible consultar API-Football.',
 
-        details: error.message,
+        details:
+          error.message,
       },
       {
         status: 500,
